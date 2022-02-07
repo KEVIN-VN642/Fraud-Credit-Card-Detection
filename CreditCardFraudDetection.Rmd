@@ -1,0 +1,247 @@
+---
+title: "Imbalanced Classification with Credit Card Fraud Detection"
+author: "Kevin Vu Duc"
+date: "06/02/2022"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library(caret)
+library(ggplot2)
+library(corrplot)
+library(rpart)
+library(Rborist)
+library(ROSE)
+library(gridExtra)
+options(digits = 5)
+
+```
+
+```{r get data, include=FALSE}
+#You can download dataset creditcard.csv from below link
+#https://www.kaggle.com/mlg-ulb/creditcardfraud
+#then unzip the file then read creditcard to R by command
+##import data
+#dat <- read.csv('creditcard.csv')
+
+
+#alternative method is use following code:
+temp <- tempfile()
+url <- 'https://raw.githubusercontent.com/jbrownlee/Datasets/master/creditcard.csv.zip'
+
+download.file(url,temp)
+
+dat <- read.csv(unz(temp,"creditcard.csv"),header = FALSE)
+col_names <- colnames(dat)
+new_colnames <- c(c("Time"),col_names[1:28],c("Amount", "Class"))
+colnames(dat) <- new_colnames
+head(dat)
+unlink(temp)
+rm(col_names,new_colnames)
+
+```
+
+## 1. Introduction
+
+Fraud is a major problem for credit card companies, because the large volume of transactions that are completed each day and many fraudulent transactions look a lot like normal transactions.The design of efficient fraudulent detection algorithms is key to decrease these losses.The design of fraud detection algorithms is however particularly challenging due to non-stationary distribution of the data, highly imbalanced classes distributions. This project will find some fraudulent detection algorithms and methods to deal with high imbalanced classes distributions.
+
+The dataset used for this project is 'creditcard', which contains many transactions in September, 2013 by European cardholders. This dataset has 492 frauds among 284807 transactions or only 0.172% of transactions are fraudulent, which is very high imbalanced.
+
+Due to confidential issue, we do not have access to the original information of dataset, only generic variables are available which are principle components of a principle component analysis. These generic features are V1, V2, ..., V28. Beside that we have two other variables that is 'Time' and 'Amount'. Feature 'Time' contains the seconds elapsed between each transaction and the first transaction in the dataset. 'Amount' is the amount of transaction. 'Class' is response variable, which is equal to 0 if transaction is normal otherwise it get value of 1(fraud).
+
+Due to the imbalance of the dataset, we will use the Area Under Curve(AUC) as the performance metric and then introduce some sampling techniques to deal with the imbalanced issue.
+
+
+## 2. Data Exploration
+
+### 2.1 Data summary
+
+Dimension of dataset
+```{r echo=FALSE}
+dim(dat)
+
+```
+
+Below are some first few lines of dataset
+
+```{r echo=FALSE}
+head(dat[,1:8],4) %>% knitr::kable(align = "c")
+head(dat[,9:16],4) %>% knitr::kable(align = "c")
+head(dat[,17:24],4) %>% knitr::kable(align = "c")
+head(dat[,25:31],4) %>% knitr::kable(align = "c")
+
+```
+
+Now, we can verify the imbalanced issue of the dataset by looking at the proportion of fraudulent cases. It is obvious that only 0.173% of cases is fraudulent, and it is confirmed that the distribution of 'Class' is highly imbalanced.
+
+```{r echo=FALSE}
+cat('Number of observations in each class')
+table(dat$Class)
+cat('Proportion of each class')
+prop.table(table(dat$Class))
+
+```
+The correlation table below shows that there is no or very little correlation between variables. This is because of V1, V2...V28 are principle components of PCA.  
+
+```{r echo=FALSE}
+corrs <- cor(dat[,-1])
+corrplot(corrs,number.cex = .9,method="circle",type="full",tl.cex=0.8,tl.col = "black")
+
+```
+
+
+### 2.2 Data transformation
+
+Since 'Time' feature do not indicate the actual time of transaction, it just a list of transaction in order of time and it has little or no significant correlation with our analysis then we can remove it from the dataset. We also need to change 'Class' variable to factor type, and scale numerical variables so the new features have the same range.
+
+```{r warning=FALSE}
+dat <- dat[,-1]
+#change Class variable to factor
+dat$Class <- as.factor(dat$Class)
+levels(dat$Class) <- c("Not_Fraud","Fraud")
+#scale numeric variables
+dat[,-30] <- scale(dat[,-30])
+
+```
+
+
+
+## 3 Modelling Methods:
+
+### 3.1 Sampling methods
+
+Standard machine learning algorithms face difficulty on imbalanced data because of the unequal distribution in dependent variable.This causes the performance of existing classifiers to get biased towards majority class. The methods to deal with this problem are widely known as ‘Sampling Methods’. It modify an imbalanced data into balanced distribution using some mechanism.
+
+This section introduce three sampling techniques to deal with imbalanced data issue, they are 'under sampling', 'over sampling' and 'random over-sampling examples'
+
+**Under sampling**
+
+Under sampling will reduce the number of observations from majority class to make the data set balanced. This method is the best use when the data set is huge and it can decrease the running time as well as storage space.
+
+There are two types of 'under sampling': Random and Informative.'Random under sampling' randomly chooses observations from majority class which are eliminated until the data set gets balanced. 'Informative under sampling' follows a pre-specified selection criterion to remove the observations from majority class.
+
+A possible problem with 'under sampling' is that we may lose important information pertaining to majority class because of removing so many observations from the dataset.
+
+**Over sampling**
+
+Opposite to 'under sampling', this method works with minority class. It replicates the observations from minority class to balance the data. It is also known as 'up sampling'. This method also have two categories: Random 'up sampling' and Informative 'up sampling'. Random oversampling balances the data by randomly oversampling the minority class. Informative oversampling uses a pre-specified criterion and synthetically generates minority class observations.
+
+The advantage of this method is that it keep all original information. And the disadvantage is it can lead to overfitting because of many observations replicated.
+
+**Random over-sampling examples(ROSE)**
+
+This method generates artificial data instead of replicating and adding observations from minority class. It is also a type of oversampling method. ROSE (random over-sampling examples) uses smoothed bootstrapping to draw artificial samples from the feature space neighbourhood around the minority class.
+
+
+### 3.2 Classification methods
+
+There are various classified algorithms, here are some of them:
+  - Logistic regression
+  - Decision Trees
+  - Random Forest
+  - Support Vector Machine
+  - K-nearest neighbor
+  - Neural network
+
+In this project, we will use three algorithms: Logistic regression, Decision Trees and Random Forest to apply on different sampling data set and then compare performances to find the best models.
+
+
+## 4. Simulation and Results
+### 4.1 Generating sampling dataset
+
+We first need to divide creditcard dataset into train and test sets, then apply different sampling methods on train dataset in order to generate down_train, up_train, rose_train dataset which correspond to 'under sampling', 'up-sampling', 'rose sampling' methods.
+
+```{r echo=FALSE, warning=FALSE}
+set.seed(1, sample.kind="Rounding") 
+test_index <- createDataPartition(y = dat$Class, times = 1, p = 0.25, list = FALSE)
+train <- dat[-test_index,]
+test <- dat[test_index,]
+cat('Dimension of train dataset \n')
+dim(train)
+cat('Dimension of test dataset \n')
+dim(test)
+
+cat('Class Distribution in train dataset \n')
+table(train$Class)
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+#down sampling
+set.seed(100,sample.kind = "Rounding")
+down_train <- downSample(x=train[,-ncol(train)],y=train$Class)
+cat('Class Distribution in down_train \n')
+table(down_train$Class)
+
+#up sampling
+set.seed(100,sample.kind = "Rounding")
+up_train <- upSample(x=train[,-ncol(train)],y=train$Class)
+cat('Class Distribution in up_train dataset \n')
+table(up_train$Class)
+
+#Random Over-Sampling Examples(ROSE)
+
+set.seed(100,sample.kind = "Rounding")
+rose_train <- ROSE(Class ~ .,data=train)$data
+cat('Class Distribution in rose_train dataset \n')
+table(rose_train$Class)
+```
+
+### 4.2 Training and evaluation models
+
+We do not fit and evaluate models in this file as it takes long time and make difficulty to generate the report. The full code for this is put in the script 'Credit Card Fraud Detection.R'. We just summary the results from that file.
+
+**Decision Trees Method**
+
+Applying Decision tree algorithm on train, down_train, up_train and rose_train then make the prediction on test dataset. Below is the performance for each case(AUC)
+
+```{r echo=FALSE}
+result_decision <- data.frame(origin_data=c(0.927),down_sampling=c(0.962),up_sampling=c(0.957),rose_sampling=c(0.941))
+rownames(result_decision) <- c('Decision Tree')
+result_decision %>% knitr::kable(align = 'c')
+
+```
+
+
+**Logistic Regression Method**
+
+Logistic regression method only converges on train and rose_train dataset. Below is the summary of performance:
+
+
+```{r echo=FALSE}
+result_logistic <- data.frame(origin_data=c(0.976),down_sampling=c('NA'),up_sampling=c('NA'),rose_sampling=c(0.982))
+rownames(result_logistic) <- c('Logistic Regression')
+result_logistic %>% knitr::kable(align = 'c')
+
+```
+
+
+**Random Forest Method**
+
+The random forest method give quite similar performance compare with logistic regression and it work on all four samplings. Below are the results:
+
+```{r echo=FALSE}
+result_rf <- data.frame(origin_data=c(0.971),down_sampling=c(0.977),up_sampling=c(0.978),rose_sampling=c(0.962))
+rownames(result_rf) <- c('Random Forest')
+result_rf %>% knitr::kable(align = 'c')
+
+```
+
+We can combine all above results to get summary table for all models and cases as below. We can see that Logistic regression and Random forest algorithms outperform Decision tree but random forest can work diversified samples than Logistic Regression, so we can go with Random forest algorithm and up sampling method.
+
+```{r echo=FALSE}
+results <- rbind(result_decision,result_logistic,result_rf)
+results %>% knitr::kable(align = 'c')
+
+```
+
+## 5. Conclusion
+
+We have implemented different classified algorithms and use different sampling methods to identify fraudulent transactions. The best algorithms are logistic regression and random forest. Although performances on different sampling methods are not much significant in these two algorithm,it shows how we can deal with imbalanced dataset issue. There are several other classification methods, which potentially give higher performance such as neural network, XGBoost, support vector machine that we may explore in the future.
+
